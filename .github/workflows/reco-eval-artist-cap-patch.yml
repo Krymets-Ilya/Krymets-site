@@ -1,0 +1,88 @@
+name: Recommendation evaluator artist cap patch
+on:
+  push:
+    paths:
+      - '.github/workflows/reco-eval-artist-cap-patch.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch evaluator
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('rs-reco-eval-zrJ2piMTmEQYTwyErMHYbgZWuZDty0R/index.html')
+          s=p.read_text()
+          old='const norm=v=>String(v).trim().toLocaleLowerCase();\n'
+          new=old+'const normalizeArtistForCap=v=>String(v).toLocaleLowerCase();\n'
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          old='function tie(a,b){return textCmp(a.artist,b.artist)||textCmp(a.title,b.title)||textCmp(a.id,b.id)}\n'
+          new=old+'function capTop6(ranking){const counts=new Map(),selected=[];for(const album of ranking){const artist=normalizeArtistForCap(album.artist),count=counts.get(artist)||0;if(count>=2)continue;selected.push(album);counts.set(artist,count+1);if(selected.length===6)break}return selected}\n'
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          old='function rankM1(pool){return pool.map(album=>({album,d:PARAM_KEYS.reduce((s,k)=>s+Math.abs(targetProfile[k]-album.profile[k]),0)})).sort((a,b)=>a.d-b.d||tie(a.album,b.album)).slice(0,6).map(x=>x.album)}'
+          new='function rankM1(pool){return pool.map(album=>({album,d:PARAM_KEYS.reduce((s,k)=>s+Math.abs(targetProfile[k]-album.profile[k]),0)})).sort((a,b)=>a.d-b.d||tie(a.album,b.album)).map(x=>x.album)}'
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          old='function rankM2(pool,changed){const set=new Set(changed);return pool.map(album=>({album,d:PARAM_KEYS.reduce((s,k)=>s+Math.abs(targetProfile[k]-album.profile[k])*(set.has(k)?5:1),0)})).sort((a,b)=>a.d-b.d||tie(a.album,b.album)).slice(0,6).map(x=>x.album)}'
+          new='function rankM2(pool,changed){const set=new Set(changed);return pool.map(album=>({album,d:PARAM_KEYS.reduce((s,k)=>s+Math.abs(targetProfile[k]-album.profile[k])*(set.has(k)?5:1),0)})).sort((a,b)=>a.d-b.d||tie(a.album,b.album)).map(x=>x.album)}'
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          old='if(currentPool.length>=6)break}'
+          new='if(currentPool.length>=6&&capTop6(currentPool).length>=6)break}'
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          old='return{albums:scored.slice(0,6).map(x=>x.album),expansionLevel,candidatePoolSize:finalPool.length,...plan}}'
+          new='return{albums:scored.map(x=>x.album),expansionLevel,candidatePoolSize:finalPool.length,...plan}}'
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          old='const pool=candidates(),m1=rankM1(pool),m2=rankM2(pool,changed),m4r=rankM4R(pool,changed);if([m1,m2,m4r.albums].some(x=>x.length!==6))'
+          new='const pool=candidates(),m1=capTop6(rankM1(pool)),m2=capTop6(rankM2(pool,changed)),m4rRanking=rankM4R(pool,changed),m4r={...m4rRanking,albums:capTop6(m4rRanking.albums)};if([m1,m2,m4r.albums].some(x=>x.length!==6))'
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          p.write_text(s)
+          PY
+      - name: Static acceptance checks
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('rs-reco-eval-zrJ2piMTmEQYTwyErMHYbgZWuZDty0R/index.html').read_text()
+          assert 'const EXPERIMENT="recommendation-ranking-v4"' in s
+          assert 'const normalizeArtistForCap=v=>String(v).toLocaleLowerCase();' in s
+          assert 'function capTop6(ranking)' in s
+          assert 'capTop6(rankM1(pool))' in s
+          assert 'capTop6(rankM2(pool,changed))' in s
+          assert 'albums:capTop6(m4rRanking.albums)' in s
+          assert 'norm(seed.artist)' in s
+          assert 'shuffle(["M1","M2","M4R"])' in s
+          print('STATIC_ACCEPTANCE=PASS')
+          PY
+      - name: Synthetic cap checks
+        run: |
+          node <<'NODE'
+          const normalizeArtistForCap=v=>String(v).toLocaleLowerCase();
+          function capTop6(ranking){const counts=new Map(),selected=[];for(const album of ranking){const artist=normalizeArtistForCap(album.artist),count=counts.get(artist)||0;if(count>=2)continue;selected.push(album);counts.set(artist,count+1);if(selected.length===6)break}return selected}
+          const ranking=[
+            {id:'a1',artist:'Alpha'},{id:'a2',artist:'ALPHA'},{id:'a3',artist:'Alpha'},
+            {id:'b1',artist:'Beta'},{id:'a4',artist:'alpha'},{id:'b2',artist:'BETA'},
+            {id:'c1',artist:'Gamma'},{id:'d1',artist:'Delta'}
+          ];
+          const got=capTop6(ranking);
+          if(got.length!==6) throw Error('Top-6 not filled');
+          const counts={}; for(const x of got){const k=normalizeArtistForCap(x.artist);counts[k]=(counts[k]||0)+1}
+          if(Math.max(...Object.values(counts))>2) throw Error('Artist cap exceeded');
+          if(got.map(x=>x.id).join(',')!=='a1,a2,b1,b2,c1,d1') throw Error('Ranking scan semantics changed');
+          if(capTop6([{artist:'A'},{artist:'A'},{artist:'A'},{artist:'B'},{artist:'B'}]).length!==4) throw Error('Insufficient capacity handling wrong');
+          console.log('SYNTHETIC_CAP=PASS');
+          NODE
+      - name: Commit patch
+        run: |
+          git config user.name 'Krymets-Ilya'
+          git config user.email 'riffspectrum@gmail.com'
+          git add rs-reco-eval-zrJ2piMTmEQYTwyErMHYbgZWuZDty0R/index.html
+          git commit -m 'feat: cap evaluator recommendations per artist'
+          git push
