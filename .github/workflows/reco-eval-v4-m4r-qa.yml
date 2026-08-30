@@ -16,6 +16,16 @@ jobs:
           npm init -y >/dev/null
           npm install playwright@1.55.0 >/dev/null
           npx playwright install chromium --with-deps >/dev/null
+      - name: Verify live v4 backend
+        run: |
+          set -euo pipefail
+          DATA_URL='https://riffspectrum.ru/api/internal/recommendation-eval-v1-q5jyxg2RKT2Z7vWjR2YQPt7j/data'
+          QA_URL='https://riffspectrum.ru/api/internal/recommendation-eval-v1-q5jyxg2RKT2Z7vWjR2YQPt7j/qa-v4-once'
+          data="$(curl -fsSL --retry 3 --retry-delay 2 "$DATA_URL")"
+          echo "$data" | jq -e '.experiment == "recommendation-ranking-v4" and .schemaVersion == 4' >/dev/null
+          qa="$(curl -fsSL --retry 3 --retry-delay 2 "$QA_URL")"
+          echo "$qa" | jq -e '.pass == true and .eventStatus == 200' >/dev/null
+          echo "$qa"
       - name: Verify M4R semantics and deployed evaluator
         env:
           PAGE_URL: https://krymets.ru/rs-reco-eval-zrJ2piMTmEQYTwyErMHYbgZWuZDty0R/?seed=metallica_master_of_puppets
@@ -38,12 +48,9 @@ jobs:
           const downTarget={...seedS,heaviness:3},downSupport={...downTarget,drive:5},downOppose={...downTarget,drive:7}; assert.ok(cmp(score(downSupport,seedS,downTarget,['heaviness']),score(downOppose,seedS,downTarget,['heaviness']))<0);
           const protectedBetter={...targetS,speed:8,drive:8,aggression:7},relatedPreserved={...targetS,speed:9,drive:6,aggression:5}; assert.ok(cmp(score(protectedBetter,seedS,targetS,['heaviness']),score(relatedPreserved,seedS,targetS,['heaviness']))<0);
           const conflictTarget={...seedS,heaviness:8,drive:4},conflictPlan=plan(seedS,conflictTarget,['heaviness','drive']); assert.deepStrictEqual(conflictPlan.related,[]); assert.deepStrictEqual(conflictPlan.neutral,['aggression']); assert.ok(conflictPlan.protectedDims.includes('aggression')); assert.deepStrictEqual(plan(seedS,{...seedS,speed:9},['speed']).related,[]); assert.deepStrictEqual(plan(seedS,{...seedS,darkness:7},['darkness']).related,[]); console.log('SYNTHETIC_M4R=PASS');
-
           const base={heaviness:7,speed:7,melody:6,drive:9,complexity:7,aggression:6,darkness:6};
           const album=(id,artist,profile)=>({id,artist,title:id,year:2000,profile:{...base,...profile}});
-          const albums=[album('metallica_master_of_puppets','Metallica',{}),
-            album('n1','Artist N1',{heaviness:3,melody:9}),album('n2','Artist N2',{heaviness:2,melody:9,drive:8,aggression:5}),album('n3','Artist N3',{heaviness:3,melody:10,complexity:8}),album('n4','Artist N4',{heaviness:2,melody:10,speed:6}),album('n5','Artist N5',{heaviness:3,melody:9,darkness:5}),album('n6','Artist N6',{heaviness:2,melody:9,drive:7,complexity:9}),album('same_artist','Metallica',{heaviness:3,melody:9}),
-            album('c1','Artist C1',{heaviness:10,drive:5}),album('c2','Artist C2',{heaviness:10,drive:4,aggression:7}),album('c3','Artist C3',{heaviness:10,drive:5,aggression:5}),album('c4','Artist C4',{heaviness:10,drive:4,speed:8}),album('c5','Artist C5',{heaviness:10,drive:5,melody:7}),album('c6','Artist C6',{heaviness:10,drive:4,darkness:7}),album('misc','Artist Misc',{heaviness:6,speed:4,melody:4,drive:5,complexity:4,aggression:4,darkness:4})];
+          const albums=[album('metallica_master_of_puppets','Metallica',{}),album('n1','Artist N1',{heaviness:3,melody:9}),album('n2','Artist N2',{heaviness:2,melody:9,drive:8,aggression:5}),album('n3','Artist N3',{heaviness:3,melody:10,complexity:8}),album('n4','Artist N4',{heaviness:2,melody:10,speed:6}),album('n5','Artist N5',{heaviness:3,melody:9,darkness:5}),album('n6','Artist N6',{heaviness:2,melody:9,drive:7,complexity:9}),album('same_artist','Metallica',{heaviness:3,melody:9}),album('c1','Artist C1',{heaviness:10,drive:5}),album('c2','Artist C2',{heaviness:10,drive:4,aggression:7}),album('c3','Artist C3',{heaviness:10,drive:5,aggression:5}),album('c4','Artist C4',{heaviness:10,drive:4,speed:8}),album('c5','Artist C5',{heaviness:10,drive:5,melody:7}),album('c6','Artist C6',{heaviness:10,drive:4,darkness:7}),album('misc','Artist Misc',{heaviness:6,speed:4,melody:4,drive:5,complexity:4,aggression:4,darkness:4})];
           const dataset={schemaVersion:4,experiment:'recommendation-ranking-v4',source:{catalogBlobSha:'qa-catalog',appRelease:'qa-release'},parameters:PARAMS.map((k,i)=>({id:k,profileKey:k,weight:1,order:i+1})),top100Artists:['Metallica'],seedAlbumIds:['metallica_master_of_puppets'],albums};
           async function setRange(page,key,value){await page.locator(`#slider-${key}`).evaluate((el,v)=>{el.value=String(v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));},value)}
           function byMethod(p){const out={};for(const l of ['a','b','c'])out[p[`variant_${l}_method`]]=p[`variant_${l}_album_ids`];return out}
